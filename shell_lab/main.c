@@ -2,6 +2,9 @@
 #include<string.h>
 #include<stdlib.h>
 #include<stdio.h>
+#include<fcntl.h>
+#include<errno.h>
+#include<sys/stat.h>
 #include<sys/wait.h>
 #include<sys/types.h>
 #include"job.h"
@@ -21,13 +24,17 @@
 #define IS_IN_FILE 0x1
 #define IS_OUT_FILE 0x2
 
+#define REDIR_IN 0x01
+#define REDIR_OUT 0x02
+
 #define ignore_whitespace(buf) do{ while(*buf && *buf == ' ') buf++; }while(0)
 
 void eval(const char *);
-int redirect(char *);
-int parse(char *, char **);
+int parse_redirect(char *, char *, char *);
+int parse_args(char *, char **);
 int is_background(int *, char **);
 int builtin(const char *);
+void redirect(const int, const char *, const char *);
 
 /** start of built-in commands **/
 static void quit();
@@ -53,15 +60,21 @@ void eval(const char *cmdline){
     pid_t pid;
     int argc;
     int ctch;
+    int redir;
     char buf[MAX_LINE];
     char *argv[MAX_ARGS];
+
+    char ifile[MAX_FILE_NAME];
+    char ofile[MAX_FILE_NAME];
+    int ifd;
+    int ofd;
     
     strcpy(buf, cmdline);
-
     buf[strlen(buf) - 1] = ' ';
 
-    redirect(buf);
-    argc = parse(buf, argv);
+    redir = parse_redirect(buf, ifile, ofile);
+
+    argc = parse_args(buf, argv);
     bg = is_background(&argc, argv);
     if(!argc){ return; }
 
@@ -72,6 +85,9 @@ void eval(const char *cmdline){
         //TODO error handle
     }
     if(pid == 0){
+
+        redirect(redir, ifile, ofile);
+
         ctch = execve(argv[0], argv, NULL);
         if(ctch == -1){
             //TODO error handle
@@ -85,22 +101,55 @@ void eval(const char *cmdline){
                 //TODO error handle
             }
         }else{
+            //TODO recycle child process 
             int jid = addjob(pid, JOB_STATE_BG);
             printf("[%d] %d\n", jid, pid);
         }
     }
 }
 
-int redirect(char *buf){
+void redirect(const int redir, const char *ifile, const char *ofile){
+    int ifd, ofd;
+    int c;
 
+    printf("redir: %d\n", redir);
+
+    if(redir & REDIR_IN){
+        ifd = open(ifile, O_RDONLY);
+        if(ifd == -1){
+            if(errno == ENOENT){
+                printf("Not exists\n");
+                exit(0);
+            }
+            perror("open in file");
+        }
+        c = dup2(ifd, STDIN_FILENO);
+        if(c == -1){
+            perror("dup2 in file");
+        }
+    }
+    if(redir & REDIR_OUT){
+        ofd = open(ofile, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+        if(ofd == -1){
+            perror("open out file");
+        }
+        c = dup2(ofd, STDOUT_FILENO);
+        if(c == -1){
+            perror("dup2 out file");
+        }
+    }
+}
+
+int parse_redirect(char *buf, char *ifile, char *ofile){
+    //TODO parse_redirection parsing check
     int idx;
     int io;
+    int redir;
     char *b = buf;
-    char ifile[MAX_FILE_NAME];
-    char ofile[MAX_FILE_NAME];
 
     io = 0;
     idx = 0;
+    redir = 0;
     while(*buf){
         //delimiter encountered
         if(!*buf || *buf == '<' || *buf == '>'){
@@ -113,12 +162,14 @@ int redirect(char *buf){
 
         if(*buf == '<'){
             memset(ifile, 0, MAX_FILE_NAME);
+            redir |= REDIR_IN;
             io = IS_IN_FILE;
             idx = 0;
             *buf = ' ';
         }
         else if(*buf == '>'){
             memset(ofile, 0, MAX_FILE_NAME);
+            redir |= REDIR_OUT;
             io = IS_OUT_FILE;
             idx = 0;
             *buf = ' ';
@@ -136,10 +187,10 @@ int redirect(char *buf){
         buf++;
     }
     buf = b;
-    return 0;
+    return redir;
 }
 
-int parse(char *buf, char **argv){
+int parse_args(char *buf, char **argv){
     int argc = 0;
     char *delimiter = NULL;
 
