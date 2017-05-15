@@ -124,6 +124,7 @@ void redirect(const int redir, const char *ifile, const char *ofile){
             perror("open in file");
         }
         c = dup2(ifd, STDIN_FILENO);
+        close(ifd);
         if(c == -1){
             perror("dup2 in file");
         }
@@ -134,6 +135,7 @@ void redirect(const int redir, const char *ifile, const char *ofile){
             perror("open out file");
         }
         c = dup2(ofd, STDOUT_FILENO);
+        close(ofd);
         if(c == -1){
             perror("dup2 out file");
         }
