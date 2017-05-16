@@ -59,3 +59,12 @@ int deletejob(pid_t pid){
     }
     return 0;
 }
+
+void list_bg_jobs(){
+    int i;
+    for(i = 0; i < MAX_JOBS; i++){
+        if(jobs[i].state == JOB_STATE_BG){
+            printf("[%d] (%d)\n", jobs[i].jid, jobs[i].pid);
+        }
+    }
+}
