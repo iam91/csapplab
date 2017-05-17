@@ -68,3 +68,36 @@ void list_bg_jobs(){
         }
     }
 }
+
+pid_t fgpid(){
+    int i;
+    for(i = 0; i < MAX_JOBS; i++){
+        if(jobs[i].state == JOB_STATE_FG){
+            return jobs[i].pid;
+        }
+    }
+    return 0;
+}
+
+job_t *getjobpid(pid_t pid){
+    int i;
+    if(pid < 1) return NULL;
+    for(i = 0; i < MAX_JOBS; i++){
+        if(jobs[i].pid == pid){
+            return &jobs[i];
+        }
+    }
+    return NULL;
+}
+
+job_t *getjobjid(int jid){
+    int i;
+    if(jid < 1) return NULL;
+    for(i = 0; i < MAX_JOBS; i++){
+        if(jobs[i].jid == jid){
+            return &jobs[i];
+        }
+    }
+    return NULL;
+}
+

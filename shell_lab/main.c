@@ -36,12 +36,15 @@
 
 #define ignore_whitespace(buf) do{ while(*buf && *buf == ' ') buf++; }while(0)
 
+static int ctch = 0;
+
 void eval(const char *);
 int parse_redirect(char *, char *, char *);
 int parse_args(char *, char **);
 int is_background(int *, char **);
 int is_builtin(const char *);
-void exe_builtin(int);
+void exe_builtin(const int, const char **);
+job_t *getjob(const char *);
 
 int redirect_input(const int, const char *);
 int redirect_output(const int, const char *);
@@ -54,8 +57,10 @@ void sigint_handler(int);
 /** end of signal handlers **/
 
 /** start of built-in commands **/
-void quit();
-void jobs();
+void quit(const char **);
+void jobs(const char **);
+void bg(const char **);
+void fg(const char **);
 /** end of built-in commands **/
 
 int main(){
@@ -63,13 +68,13 @@ int main(){
 
     //register signal handlers
     signal(SIGCHLD, sigchld_handler);
+    signal(SIGTSTP, sigtstp_handler);
+    signal(SIGINT, sigint_handler);
     
     while(1){
         printf("%s", SHELL_PROMPT);
         fgets(cmdline, MAX_LINE, stdin);
-        if(feof(stdin)){
-            exit(0);
-        }
+        if(feof(stdin)){ exit(0); }
 
         eval(cmdline);
     }
@@ -79,7 +84,6 @@ void eval(const char *cmdline){
     int bg, bltin;
     pid_t pid;
     int argc;
-    int ctch;
     int redir;
     char buf[MAX_LINE];
     char *argv[MAX_ARGS];
@@ -106,7 +110,7 @@ void eval(const char *cmdline){
     if(bltin){
         stdin_backup = redirect_input(redir, ifile);
         stdout_backup = redirect_output(redir, ofile);
-        exe_builtin(bltin);
+        exe_builtin(bltin, (const char **)argv);
         fix_io(stdin_backup, stdout_backup);
         return;
     }
@@ -198,8 +202,8 @@ int redirect_output(const int redir, const char *ofile){
 
 int parse_redirect(char *buf, char *ifile, char *ofile){
     //TODO some problems with &
-    int idx;
     int io;
+    int idx;
     int redir;
     char *b = buf;
 
@@ -255,7 +259,6 @@ int parse_args(char *buf, char **argv){
     char *delimiter = NULL;
 
     ignore_whitespace(buf);
-    
     while((delimiter = strchr(buf, ' '))){
         *delimiter = '\0';
         argv[argc++] = buf;
@@ -278,35 +281,64 @@ int is_background(int *argc, char **argv){
 int is_builtin(const char *cmd){
     if(!strcmp(cmd, BUILTIN_CMD_QUIT)){
         return IS_BUILTIN_QUIT;
-    }
-    else if(!strcmp(cmd, BUILTIN_CMD_JOBS)){
+    }else if(!strcmp(cmd, BUILTIN_CMD_JOBS)){
         return IS_BUILTIN_JOBS;
-    }
-    else{
+    }else if(!strcmp(cmd, BUILTIN_CMD_FG)){
+        return IS_BUILTIN_FG;
+    }else if(!strcmp(cmd, BUILTIN_CMD_BG)){
+        return IS_BUILTIN_BG;
+    }else{
         return IS_NOT_BUILTIN;
     }
 }
 
-void exe_builtin(int builtin){
+void exe_builtin(const int builtin, const char **argv){
     switch(builtin){
         case IS_BUILTIN_QUIT:
-            quit();
-            break;
+            quit(argv); break;
         case IS_BUILTIN_JOBS:
-            jobs();
-            break;
+            jobs(argv); break;
+        case IS_BUILTIN_BG:
+            bg(argv); break;
+        case IS_BUILTIN_FG:
+            fg(argv); break;
         default:
             break;
     }
 }
 
+job_t *getjob(const char *xid){
+    if(!xid || !strlen(xid)) return NULL;
+    if(xid[0] == '%') return getjobjid(atoi(&xid[1]));
+    else return getjobpid(atoi(xid));
+}
+
 /** start of built-in commands **/
-void quit(){
+void quit(const char **argv){
     exit(0);
 }
 
-void jobs(){
+void jobs(const char **argv){
     list_bg_jobs();
+}
+
+void bg(const char **argv){
+    job_t *job = getjob(argv[1]);
+    ctch = kill(job->pid, SIGCONT);
+    if(ctch == -1) perror("bg kill");
+    job->state = JOB_STATE_BG;
+}
+
+void fg(const char **argv){
+    job_t *job = getjob(argv[1]);
+    ctch = kill(job->pid, SIGCONT);
+    if(ctch == -1) perror("fg kill");
+    job->state = JOB_STATE_FG;
+    
+    ctch = waitpid(job->pid, NULL, 0);
+    if(ctch == -1){
+        //TODO error handle
+    }
 }
 /** end of built-in commands **/
 
@@ -320,6 +352,26 @@ void sigchld_handler(int sig){
     if(pid == -1){
         if(errno != ECHILD){
             perror("waitpid");
+        }
+    }
+}
+
+void sigtstp_handler(int sig){
+    pid_t fg_pid = fgpid();
+    ctch = kill(-fg_pid, SIGTSTP);
+    if(ctch == -1){ 
+        if(errno == ECHILD){
+            perror("kill"); 
+        }
+    }
+}
+
+void sigint_handler(int sig){
+    pid_t fg_pid = fgpid();
+    ctch = kill(-fg_pid, SIGINT);
+    if(ctch == -1){ 
+        if(errno == ECHILD){
+            perror("kill"); 
         }
     }
 }

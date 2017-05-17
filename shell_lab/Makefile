@@ -1,11 +1,12 @@
-CC = gcc
-CFLAGS = -Wall
-FILES = main.c job.c job.h
-TARGET = zshell
+FILES=main.c job.c job.h
+CC=gcc
+CFLAGS=-Wall
 
 zshell: ${FILES}
-	gcc ${CFLAGS} -o ${TARGET} ${FILES}
+	${CC} ${CFLAGS} -o zshell ${FILES}
+
 debug: ${FILES}
-	gcc -ggdb ${CFLAGS} -o ${TARGET} ${FILES}
+	${CC} -ggdb ${CFLAGS} -o zshell ${FILES}
+
 clear:
-	rm ${TARGET}
+	rm ./zshell

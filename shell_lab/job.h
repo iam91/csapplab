@@ -20,3 +20,6 @@ int maxjid();
 int addjob(pid_t pid, int state);
 int deletejob(pid_t pid); 
 void list_bg_jobs();
+pid_t fgpid();
+job_t *getjobpid(pid_t);
+job_t *getjobjid(int);
