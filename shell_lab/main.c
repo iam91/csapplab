@@ -37,7 +37,9 @@
 #define ignore_whitespace(buf) do{ while(*buf && *buf == ' ') buf++; }while(0)
 
 static int ctch = 0;
+static int verbose = 0;
 
+void usage(void);
 void eval(const char *);
 int parse_redirect(char *, char *, char *);
 int parse_args(char *, char **);
@@ -63,8 +65,28 @@ void bg(const char **);
 void fg(const char **);
 /** end of built-in commands **/
 
-int main(){
+int main(int argc, char **argv){
+    char c;
     char cmdline[MAX_LINE];
+    int emit_prompt = 1;
+
+    dup2(1, 2);
+
+    while ((c = getopt(argc, argv, "hvp")) != EOF) {
+        switch (c) {
+        case 'h':             /* print help message */
+            usage();
+	    break;
+        case 'v':             /* emit additional diagnostic info */
+            verbose = 1;
+	    break;
+        case 'p':             /* don't print a prompt */
+            emit_prompt = 0;  /* handy for automatic testing */
+	    break;
+        default:
+            usage();
+        }
+    }
 
     //register signal handlers
     signal(SIGCHLD, sigchld_handler);
@@ -72,12 +94,27 @@ int main(){
     signal(SIGINT, sigint_handler);
     
     while(1){
-        printf("%s", SHELL_PROMPT);
+        if(emit_prompt){
+            printf("%s", SHELL_PROMPT);
+            fflush(stdout);
+        }
         fgets(cmdline, MAX_LINE, stdin);
-        if(feof(stdin)){ exit(0); }
+        if(feof(stdin)){ 
+            fflush(stdout);
+            exit(0); 
+        }
 
         eval(cmdline);
     }
+}
+
+void usage(void) 
+{
+    printf("Usage: shell [-hvp]\n");
+    printf("   -h   print this message\n");
+    printf("   -v   print additional diagnostic information\n");
+    printf("   -p   do not emit a command prompt\n");
+    exit(1);
 }
 
 void eval(const char *cmdline){
@@ -138,7 +175,7 @@ void eval(const char *cmdline){
         }else{
             //TODO recycle child process 
             int jid = addjob(pid, JOB_STATE_BG);
-            printf("[%d] %d\n", jid, pid);
+            printf("[%d] (%d)\n", jid, pid);
         }
     }
 }

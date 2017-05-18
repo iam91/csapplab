@@ -3,10 +3,13 @@ CC=gcc
 CFLAGS=-Wall
 
 zshell: ${FILES}
-	${CC} ${CFLAGS} -o zshell ${FILES}
+	${CC} ${CFLAGS} -o tsh ${FILES}
 
 debug: ${FILES}
-	${CC} -ggdb ${CFLAGS} -o zshell ${FILES}
+	${CC} -ggdb ${CFLAGS} -o tsh ${FILES}
+
+test:
+	cp ./tsh ./shlab-handout/tsh
 
 clear:
-	rm ./zshell
+	rm ./tsh
