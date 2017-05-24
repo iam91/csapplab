@@ -1,3 +1,5 @@
+//13
+//mysplit child process reap
 #include<unistd.h>
 #include<string.h>
 #include<signal.h>
@@ -118,6 +120,7 @@ int main(int argc, char **argv){
 
 void waitfg(void)
 {
+    //!!
 	pause_flag = 0;
 	pause();
 	if (!pause_flag) {
@@ -181,6 +184,7 @@ void eval(const char *cmdline){
     if(pid == 0){
         //set child process's group id, 
         //or child process inherits process group id from parent process
+        //!!
         setpgid(0,0); 
 
         redirect_input(redir, ifile);
@@ -386,14 +390,19 @@ void jobs(const char **argv){
 
 void bg(const char **argv){
     job_t *job = getjob(argv[1]);
-    ctch = kill(job->pid, SIGCONT);
+    if(!job) return;
+    ctch = kill(-job->pid, SIGCONT); //!! kill child process group
+
     if(ctch == -1) perror("bg kill");
     job->state = BG;
+    printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
 }
 
 void fg(const char **argv){
     job_t *job = getjob(argv[1]);
-    ctch = kill(job->pid, SIGCONT);
+    if(!job) return;
+
+    ctch = kill(-job->pid, SIGCONT);
     if(ctch == -1) perror("fg kill");
     job->state = FG;
     waitfg();
@@ -404,6 +413,8 @@ void fg(const char **argv){
 void sigchld_handler(int sig){
     pid_t pid;
     while((pid = waitpid(-1, NULL, WNOHANG)) > 0){
+        // printf("Process %d reaped.\n", pid);
+        if(getjobpid(pid)->state == FG) pause_flag = 1;
         deletejob(pid);
     }
     if(pid == -1){
@@ -414,7 +425,6 @@ void sigchld_handler(int sig){
 }
 
 void sigtstp_handler(int sig){
-    printf("in sigtstp_handler\n");
     pid_t fg_pid = fgpid();
     if(!fg_pid) return;
 

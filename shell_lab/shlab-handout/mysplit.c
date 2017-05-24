@@ -23,9 +23,9 @@ int main(int argc, char **argv)
 
 
     if (fork() == 0) { /* child */
-	for (i=0; i < secs; i++)
-	    sleep(1);
-	exit(0);
+        for (i=0; i < secs; i++)
+            sleep(1);
+        exit(0);
     }
 
     /* parent waits for child to terminate */
