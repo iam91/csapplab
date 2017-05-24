@@ -38,7 +38,10 @@
 
 static int ctch = 0;
 static int verbose = 0;
+static int redirection = 0;
+static int pause_flag = 0;
 
+void waitfg(void);
 void usage(void);
 void eval(const char *);
 int parse_redirect(char *, char *, char *);
@@ -72,7 +75,7 @@ int main(int argc, char **argv){
 
     dup2(1, 2);
 
-    while ((c = getopt(argc, argv, "hvp")) != EOF) {
+    while ((c = getopt(argc, argv, "hvpr")) != EOF) {
         switch (c) {
         case 'h':             /* print help message */
             usage();
@@ -83,6 +86,9 @@ int main(int argc, char **argv){
         case 'p':             /* don't print a prompt */
             emit_prompt = 0;  /* handy for automatic testing */
 	    break;
+        case 'r':
+            redirection = 1;
+        break;
         default:
             usage();
         }
@@ -92,6 +98,8 @@ int main(int argc, char **argv){
     signal(SIGCHLD, sigchld_handler);
     signal(SIGTSTP, sigtstp_handler);
     signal(SIGINT, sigint_handler);
+
+    initjobs();
     
     while(1){
         if(emit_prompt){
@@ -106,6 +114,16 @@ int main(int argc, char **argv){
 
         eval(cmdline);
     }
+}
+
+void waitfg(void)
+{
+	pause_flag = 0;
+	pause();
+	if (!pause_flag) {
+		pause();
+	}
+	return;
 }
 
 void usage(void) 
@@ -133,11 +151,14 @@ void eval(const char *cmdline){
     strcpy(buf, cmdline);
     buf[strlen(buf) - 1] = ' ';
 
-    redir = parse_redirect(buf, ifile, ofile);
-    if(redir == -1){
-        printf("Parsing fails\n");
-        return;
+    if(redirection){
+        redir = parse_redirect(buf, ifile, ofile);
+        if(redir == -1){
+            printf("Parsing fails\n");
+            return;
+        }
     }
+
     argc = parse_args(buf, argv);
 
     bg = is_background(&argc, argv);
@@ -158,24 +179,28 @@ void eval(const char *cmdline){
         //TODO error handle
     }
     if(pid == 0){
+        //set child process's group id, 
+        //or child process inherits process group id from parent process
+        setpgid(0,0); 
+
         redirect_input(redir, ifile);
         redirect_output(redir, ofile);
         ctch = execve(argv[0], argv, NULL);
         if(ctch == -1){
-            //TODO error handle
-            perror("execve");
+            printf("%s: Command not found.\n", argv[0]);
+            exit(0);
         }
     }else{
+        // printf("-------------\n");      
+        // printf("forked parent pid: %d, this pid: %d, children pid: %d\n", getppid(), getpid(), pid);
+        // printf("forked parent gid: %d, this gid: %d, children gid: %d\n", getpgid(getppid()), getpgid(getpid()), getpgid(pid));  
+        // printf("-------------\n");
         if(!bg){
-            addjob(pid, JOB_STATE_FG);
-            ctch = waitpid(pid, NULL, 0);
-            if(ctch == -1){
-                //TODO error handle
-            }
+            addjob(pid, FG, cmdline);
+            waitfg();
         }else{
-            //TODO recycle child process 
-            int jid = addjob(pid, JOB_STATE_BG);
-            printf("[%d] (%d)\n", jid, pid);
+            int jid = addjob(pid, BG, cmdline);
+            printf("[%d] (%d) %s", jid, pid, cmdline);
         }
     }
 }
@@ -200,7 +225,7 @@ void fix_io(int stdin_backup, int stdout_backup){
 
 int redirect_input(const int redir, const char *ifile){
     int c, ifd, stdin_backup = STDIN_FILENO;
-    if(redir & REDIR_IN){
+    if(redir & REDIR_IN && redirection){
         stdin_backup = dup(STDIN_FILENO);
         ifd = open(ifile, O_RDONLY);
         if(ifd == -1){
@@ -221,7 +246,7 @@ int redirect_input(const int redir, const char *ifile){
 
 int redirect_output(const int redir, const char *ofile){
     int c, ofd, stdout_backup = STDOUT_FILENO;
-    if(redir & REDIR_OUT){
+    if(redir & REDIR_OUT && redirection){
         stdout_backup = dup(STDOUT_FILENO);
         //chmod 744
         ofd = open(ofile, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
@@ -356,26 +381,22 @@ void quit(const char **argv){
 }
 
 void jobs(const char **argv){
-    list_bg_jobs();
+    listjobs(BG|ST);
 }
 
 void bg(const char **argv){
     job_t *job = getjob(argv[1]);
     ctch = kill(job->pid, SIGCONT);
     if(ctch == -1) perror("bg kill");
-    job->state = JOB_STATE_BG;
+    job->state = BG;
 }
 
 void fg(const char **argv){
     job_t *job = getjob(argv[1]);
     ctch = kill(job->pid, SIGCONT);
     if(ctch == -1) perror("fg kill");
-    job->state = JOB_STATE_FG;
-    
-    ctch = waitpid(job->pid, NULL, 0);
-    if(ctch == -1){
-        //TODO error handle
-    }
+    job->state = FG;
+    waitfg();
 }
 /** end of built-in commands **/
 
@@ -384,7 +405,6 @@ void sigchld_handler(int sig){
     pid_t pid;
     while((pid = waitpid(-1, NULL, WNOHANG)) > 0){
         deletejob(pid);
-        printf("PID: %d reaped.\n", pid);
     }
     if(pid == -1){
         if(errno != ECHILD){
@@ -394,22 +414,31 @@ void sigchld_handler(int sig){
 }
 
 void sigtstp_handler(int sig){
+    printf("in sigtstp_handler\n");
     pid_t fg_pid = fgpid();
+    if(!fg_pid) return;
+
     ctch = kill(-fg_pid, SIGTSTP);
-    if(ctch == -1){ 
-        if(errno == ECHILD){
-            perror("kill"); 
-        }
+    if(ctch == -1){
+        perror("sigtstp_handler kill");
+        // perror("sigtstp_handler kill");
+        return;
     }
+    job_t *job = getjobpid(fg_pid);
+    job->state = ST;
+    pause_flag = 1;
+    printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(fg_pid), fg_pid, sig);
 }
 
 void sigint_handler(int sig){
     pid_t fg_pid = fgpid();
+    if(!fg_pid) return;
+
     ctch = kill(-fg_pid, SIGINT);
     if(ctch == -1){ 
-        if(errno == ECHILD){
-            perror("kill"); 
-        }
+        perror("sigint_handler kill");
+        return;
     }
+    printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(fg_pid), fg_pid, sig);
 }
 /** end of signal handlers **/

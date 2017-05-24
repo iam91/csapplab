@@ -130,9 +130,9 @@ while (<INFILE>) {
 
     # Send SIGINT (ctrl-c)
     elsif ($line =~ /INT/) {
-	if ($verbose) {
+	# if ($verbose) {
 	    print "$0: Sending SIGINT signal to process $pid\n";
-	}
+	# }
 	kill 'INT', $pid;
     }
 
@@ -177,6 +177,12 @@ while (<INFILE>) {
 	    print "$0: Sleeping $1 secs\n";
 	}
 	sleep $1;
+    }
+
+    elsif ($line =~ /^\/bin\/echo/) {
+        if ($verbose) {
+            print "$line\n";
+        }
     }
 
     # Unknown input

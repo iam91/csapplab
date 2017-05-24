@@ -1,25 +1,28 @@
 #include<sys/types.h>
 
-#define MAX_JOBS 16
-#define MAX_JID  (1<<16)
+#define MAXLINE 1024
+#define MAXJOBS 16
+#define MAXJID  (1<<16)
 
-#define JOB_STATE_UNDEF 0
-#define JOB_STATE_FG    1
-#define JOB_STATE_BG    2
-#define JOB_STATE_ST    3
+#define UNDEF 0x0
+#define FG    0x1
+#define BG    0x2
+#define ST    0x4
 
 typedef struct job_t{
     pid_t pid;
     int jid;
     int state;
+    char cmdline[MAXLINE];
 } job_t;
 
 void clearjob(job_t *job);
 void initjobs();
 int maxjid(); 
-int addjob(pid_t pid, int state);
+int addjob(pid_t pid, int state, const char *cmdline);
 int deletejob(pid_t pid); 
-void list_bg_jobs();
 pid_t fgpid();
-job_t *getjobpid(pid_t);
-job_t *getjobjid(int);
+struct job_t *getjobpid(pid_t pid);
+struct job_t *getjobjid(int jid); 
+int pid2jid(pid_t pid); 
+void listjobs(int states);

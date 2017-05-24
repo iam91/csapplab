@@ -1,103 +1,153 @@
 #include<stdio.h>
+#include<string.h>
 #include"job.h"
 
-#define check_pid(pid) do{ if(pid < 1) return 0; }while(0)
+static int nextjid = 1;
+static job_t jobs[MAXJOBS];
 
-static int next_jid = 1;
-static job_t jobs[MAX_JOBS];
+/* clearjob - Clear the entries in a job struct */
+void clearjob(struct job_t *job) {
+    job->pid = 0;
+    job->jid = 0;
+    job->state = UNDEF;
+    job->cmdline[0] = '\0';
+}
 
-int maxjid(){
-    int i, max = 0;
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].jid > max){
-            max = jobs[i].jid;
-        }
-    }
+/* initjobs - Initialize the job list */
+void initjobs() {
+    int i;
+
+    for (i = 0; i < MAXJOBS; i++)
+	clearjob(&jobs[i]);
+}
+
+/* maxjid - Returns largest allocated job ID */
+int maxjid() 
+{
+    int i, max=0;
+
+    for (i = 0; i < MAXJOBS; i++)
+	if (jobs[i].jid > max)
+	    max = jobs[i].jid;
     return max;
 }
 
-void clearjob(job_t *job){
-    job->pid = 0;
-    job->jid = 0;
-    job->state = JOB_STATE_UNDEF;
-}
-
-void initjobs(){
+/* addjob - Add a job to the job list */
+int addjob(pid_t pid, int state, const char *cmdline) 
+{
     int i;
-    for(i = 0; i < MAX_JOBS; i++){
-        clearjob(&jobs[i]);
-    }
-}
+    
+    if (pid < 1)
+	    return 0;
 
-int addjob(pid_t pid, int state){
-    int i;
-
-    check_pid(pid);
-
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].state == JOB_STATE_UNDEF){
+    for (i = 0; i < MAXJOBS; i++) {
+        if (jobs[i].pid == 0) {
             jobs[i].pid = pid;
-            jobs[i].jid = next_jid++;
             jobs[i].state = state;
+            jobs[i].jid = nextjid++;
+            if (nextjid > MAXJOBS)
+                nextjid = 1;
+            strcpy(jobs[i].cmdline, cmdline);
+            // if(verbose){
+            //     printf("Added job [%d] %d %s\n", jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
+            // }
             return jobs[i].jid;
         }
     }
+    printf("Tried to create too many jobs\n");
     return 0;
 }
 
-int deletejob(pid_t pid){
+/* deletejob - Delete a job whose PID=pid from the job list */
+int deletejob(pid_t pid) 
+{
     int i;
 
-    check_pid(pid);
+    if (pid < 1)
+	return 0;
 
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].pid == pid){
-            clearjob(&jobs[i]);
-            next_jid = maxjid() + 1;
-            return 1;
-        }
+    for (i = 0; i < MAXJOBS; i++) {
+	if (jobs[i].pid == pid) {
+	    clearjob(&jobs[i]);
+	    nextjid = maxjid(jobs) + 1;
+	    return 1;
+	}
     }
     return 0;
 }
 
-void list_bg_jobs(){
+/* fgpid - Return PID of current foreground job, 0 if no such job */
+pid_t fgpid() {
     int i;
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].state == JOB_STATE_BG){
-            printf("[%d] (%d)\n", jobs[i].jid, jobs[i].pid);
-        }
-    }
-}
 
-pid_t fgpid(){
-    int i;
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].state == JOB_STATE_FG){
-            return jobs[i].pid;
-        }
-    }
+    for (i = 0; i < MAXJOBS; i++)
+	if (jobs[i].state & FG)
+	    return jobs[i].pid;
     return 0;
 }
 
-job_t *getjobpid(pid_t pid){
+/* getjobpid  - Find a job (by PID) on the job list */
+job_t *getjobpid(pid_t pid) {
     int i;
-    if(pid < 1) return NULL;
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].pid == pid){
+
+    if (pid < 1)
+	    return NULL;
+    for (i = 0; i < MAXJOBS; i++)
+        if (jobs[i].pid == pid)
             return &jobs[i];
-        }
-    }
     return NULL;
 }
 
-job_t *getjobjid(int jid){
+/* getjobjid  - Find a job (by JID) on the job list */
+job_t *getjobjid(int jid) 
+{
     int i;
-    if(jid < 1) return NULL;
-    for(i = 0; i < MAX_JOBS; i++){
-        if(jobs[i].jid == jid){
+
+    if (jid < 1)
+	    return NULL;
+    for (i = 0; i < MAXJOBS; i++)
+        if (jobs[i].jid == jid)
             return &jobs[i];
-        }
-    }
     return NULL;
 }
 
+/* pid2jid - Map process ID to job ID */
+int pid2jid(pid_t pid) 
+{
+    int i;
+
+    if (pid < 1)
+	    return 0;
+    for (i = 0; i < MAXJOBS; i++)
+	    if (jobs[i].pid == pid) {
+            return jobs[i].jid;
+        }
+    return 0;
+}
+
+/* listjobs - Print the job list */
+void listjobs(int states) 
+{
+    int i;
+    
+    for (i = 0; i < MAXJOBS; i++) {
+        if (jobs[i].pid != 0 && jobs[i].state & states) {
+            printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
+            switch (jobs[i].state) {
+                case BG: 
+                    printf("Running ");
+                    break;
+                case FG: 
+                    printf("Foreground ");
+                    break;
+                case ST: 
+                    printf("Stopped ");
+                    break;
+                default:
+                    printf("listjobs: Internal error: job[%d].state=%d ", 
+                    i, jobs[i].state);
+            }
+            printf("%s", jobs[i].cmdline);
+        }
+    }
+}
