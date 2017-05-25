@@ -50,7 +50,7 @@ int parse_redirect(char *, char *, char *);
 int parse_args(char *, char **);
 int is_background(int *, char **);
 int is_builtin(const char *);
-void exe_builtin(const int, const char **);
+void exe_builtin(const int, const int, const char **);
 job_t *getjob(const char *);
 
 int redirect_input(const int, const char *);
@@ -64,11 +64,12 @@ void sigint_handler(int);
 /** end of signal handlers **/
 
 /** start of built-in commands **/
-void quit(const char **);
-void jobs(const char **);
-void bg(const char **);
-void fg(const char **);
+void quit(const int, const char **);
+void jobs(const int, const char **);
+void bg(const int, const char **);
+void fg(const int, const char **);
 /** end of built-in commands **/
+int builtin_args_check(const int, const char **);
 
 int main(int argc, char **argv){
     char c;
@@ -171,7 +172,7 @@ void eval(const char *cmdline){
     if(bltin){
         stdin_backup = redirect_input(redir, ifile);
         stdout_backup = redirect_output(redir, ofile);
-        exe_builtin(bltin, (const char **)argv);
+        exe_builtin(bltin, argc, (const char **)argv);
         fix_io(stdin_backup, stdout_backup);
         return;
     }
@@ -358,39 +359,49 @@ int is_builtin(const char *cmd){
     }
 }
 
-void exe_builtin(const int builtin, const char **argv){
+void exe_builtin(const int builtin, const int argc, const char **argv){
     switch(builtin){
         case IS_BUILTIN_QUIT:
-            quit(argv); break;
+            quit(argc, argv); break;
         case IS_BUILTIN_JOBS:
-            jobs(argv); break;
+            jobs(argc, argv); break;
         case IS_BUILTIN_BG:
-            bg(argv); break;
+            bg(argc, argv); break;
         case IS_BUILTIN_FG:
-            fg(argv); break;
+            fg(argc, argv); break;
         default:
             break;
     }
 }
 
 job_t *getjob(const char *xid){
-    if(!xid || !strlen(xid)) return NULL;
-    if(xid[0] == '%') return getjobjid(atoi(&xid[1]));
-    else return getjobpid(atoi(xid));
+    job_t *job = NULL;
+    if(xid[0] == '%'){ 
+        job = getjobjid(atoi(&xid[1]));
+        if(!job) printf("(%%%s): No such job\n", &xid[1]);
+    }
+    else{ 
+        job = getjobpid(atoi(xid));
+        if(!job) printf("(%s): No such process\n", xid);
+    }
+    return job;
 }
 
 /** start of built-in commands **/
-void quit(const char **argv){
+void quit(const int argc, const char **argv){
     exit(0);
 }
 
-void jobs(const char **argv){
+void jobs(const int argc, const char **argv){
     listjobs(BG|ST);
 }
 
-void bg(const char **argv){
+void bg(const int argc, const char **argv){
+    if(!builtin_args_check(argc, argv)) return;
+
     job_t *job = getjob(argv[1]);
     if(!job) return;
+
     ctch = kill(-job->pid, SIGCONT); //!! kill child process group
 
     if(ctch == -1) perror("bg kill");
@@ -398,7 +409,9 @@ void bg(const char **argv){
     printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
 }
 
-void fg(const char **argv){
+void fg(const int argc, const char **argv){
+    if(!builtin_args_check(argc, argv)) return;
+
     job_t *job = getjob(argv[1]);
     if(!job) return;
 
@@ -408,14 +421,40 @@ void fg(const char **argv){
     waitfg();
 }
 /** end of built-in commands **/
+int builtin_args_check(const int argc, const char **argv){
+    if(!strcmp(argv[0], BUILTIN_CMD_FG) || !strcmp(argv[0], BUILTIN_CMD_BG)){
+        if(argc < 2){
+            printf("%s command requires PID or %%jobid argument\n", argv[0]);
+            return 0;
+        }else if(argv[1][0] == '%' && !atoi(&argv[1][1])){
+            printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+            return 0;
+        }
+    }
+    return 1;
+}
 
 /** start of signal handlers **/
-void sigchld_handler(int sig){
+void sigchld_handler(int sig){//!!
     pid_t pid;
-    while((pid = waitpid(-1, NULL, WNOHANG)) > 0){
+    int state;
+
+    while((pid = waitpid(-1, &state, WNOHANG | WUNTRACED)) > 0){
         // printf("Process %d reaped.\n", pid);
-        if(getjobpid(pid)->state == FG) pause_flag = 1;
-        deletejob(pid);
+        if(WIFSTOPPED(state)){
+            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(state));
+            job_t *job = getjobpid(pid);
+            job->state = ST;
+            pause_flag = 1;
+        }else if(WIFSIGNALED(state)){
+            if(WTERMSIG(state) == SIGINT){
+                printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, SIGINT);
+            }
+            pause_flag = 1;
+            deletejob(pid);
+        }else{
+            deletejob(pid);
+        }
     }
     if(pid == -1){
         if(errno != ECHILD){
@@ -431,13 +470,8 @@ void sigtstp_handler(int sig){
     ctch = kill(-fg_pid, SIGTSTP);
     if(ctch == -1){
         perror("sigtstp_handler kill");
-        // perror("sigtstp_handler kill");
         return;
     }
-    job_t *job = getjobpid(fg_pid);
-    job->state = ST;
-    pause_flag = 1;
-    printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(fg_pid), fg_pid, sig);
 }
 
 void sigint_handler(int sig){
@@ -449,6 +483,5 @@ void sigint_handler(int sig){
         perror("sigint_handler kill");
         return;
     }
-    printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(fg_pid), fg_pid, sig);
 }
 /** end of signal handlers **/
